@@ -1,0 +1,31 @@
+# Dependencies
+/node_modules
+
+# Environment Variables - ΚΡΙΣΙΜΟ ΓΙΑ ΤΗΝ ΑΣΦΑΛΕΙΑ!
+# Αυτό το αρχείο περιέχει κωδικούς και "μυστικά". ΠΟΤΕ μην το ανεβάσεις.
+.env
+
+# Logs
+# Αγνοούμε αρχεία log που μπορεί να δημιουργήσει η εφαρμογή.
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build output (αν στο μέλλον χρησιμοποιήσεις TypeScript)
+/dist
+/build
+
+# Test reports
+/coverage
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Editor directories and files
+# Αγνοούμε ρυθμίσεις που αφορούν τον editor του κάθε προγραμματιστή.
+.idea
+.vscode
+*.sublime-project
+*.sublime-workspace
