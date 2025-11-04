@@ -1,31 +1,28 @@
-function groupCrews(results){
-    const crewMap = {};
+function groupCrews(flatResults){
+    const crewMap = new Map();
 
-    for(const row of results){
+    for(const row of flatResults){
 
-        if(!crewMap[row.crew_id]){
-            crewMap[row.crew_id] = {
+        if (!crewMap.has(row.crew_id)){
+            crewMap.set(row.crew_id, {
                 id: row.crew_id,
                 title: row.crew_title,
                 video_url: row.video_url,
                 members: []
-            };
+            });
         }
+    const currentCrew = crewMap.get(row.crew_id);
 
-        crewMap[row.crew_id].members.push({
-            character_id: row.character_id,
-            name: row.character_name,
-            position: row.position,
-            image_url: row.image_ulr,
-            info_url: row.info_url,
-            shop: row.shop,
-            required_level: row.required_level
+    currentCrew.members.push({
+        character_id: row.character_id,
+        name: row.character_name,
+        position: row.position,
+        image_url: row.image_url,
+        info_url: row.info_url,
+        shop: row.shop,
+        required_level: row.required_level
     });
-
-   
-        
     }
-     return Object.values(crewMap);
+    return Array.from(crewMap.values());
 }
-
 module.exports = groupCrews;

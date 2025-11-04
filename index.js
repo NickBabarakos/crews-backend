@@ -14,45 +14,60 @@ const pool = new Pool({
     connectionString: process.env.DATABASE_URL
 });
 
+const CREWS_PER_PAGE = 4;
 
 app.get('/api/stages', async(req,res) =>{
     const {stage, level} = req.query;
-    const pageNumber = parseInt(req.query.page) || 1; 
+    const page = parseInt(req.query.page) || 1; 
+
+    const offset = (page-1)*CREWS_PER_PAGE;
 
     try{
         const client = await pool.connect();
         const queryText = `
+            WITH PagedCrews AS (
+                SELECT crews.id
+                FROM crews
+                JOIN stages ON crews.stage_id = stages.id
+                WHERE stages.name = $1 AND stages.level = $2
+                ORDER BY crews.id
+                LIMIT $3 OFFSET $4
+            )
             SELECT
-                crews.id AS crew_id,
-                crews.title AS crew_title,
-                crews.video_url,
-                crew_members.position,
-                crew_members.required_level,
-                characters.id AS character_id,
-                characters.name AS character_name,
-                characters.image_url,
-                characters.info_url,
-                characters.shop
+                c.id AS crew_id,
+                c.title AS crew_title,
+                c.video_url,
+                cm.position,
+                cm.required_level,
+                char.id AS character_id,
+                char.name AS character_name,
+                char.image_url,
+                char.info_url,
+                char.shop
             FROM
-                stages
+                crews c
             JOIN
-                crews ON stages.id = crews.stage_id
-            JOIN 
-                crew_members ON crews.id = crew_members.crew_id
+                crew_members cm ON c.id = cm.crew_id
             JOIN
-                characters ON crew_members.character_id = characters.id
+                characters char ON cm.character_id = char.id
             WHERE
-                stages.name = $1 AND stages.level = $2
+                c.id IN (SELECT id FROM PagedCrews)
             ORDER BY
-                crews.id;
+                c.id, char.id;
         `;
-        const values = [stage, level];
+
+        const values = [stage, level, CREWS_PER_PAGE+1, offset];
 
         const result = await client.query(queryText, values);
         client.release();
+        const groupedCrews = groupCrews(result.rows);
+        const hasMore = groupedCrews.length > CREWS_PER_PAGE;
+        const crewsForPage = groupedCrews.slice(0, CREWS_PER_PAGE);
 
-        const Crews = groupCrews(result.rows);
-        res.json(Crews);
+        res.json({
+            crews: crewsForPage,
+            hasMore: hasMore
+        });
     } catch (err){
         console.error(err);
         res.status(500).send('Error executing query');
