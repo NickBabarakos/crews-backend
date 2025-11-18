@@ -15,6 +15,7 @@ const pool = new Pool({
 });
 
 const CREWS_PER_PAGE = 4;
+const CHARACTERS_PER_PAGE = 60;
 
 app.get('/api/stages', async(req,res) =>{
     const {stage, level} = req.query;
@@ -43,7 +44,7 @@ app.get('/api/stages', async(req,res) =>{
                 char.name AS character_name,
                 char.image_url,
                 char.info_url,
-                char.shop
+                char.type
             FROM
                 crews c
             JOIN
@@ -78,20 +79,48 @@ app.get('/api/stages', async(req,res) =>{
 });
 
 
-app.get('/crews', async(req,res) => {
-    try{
-        const client = await pool.connect();
-        const result = await client.query('SELECT * FROM characters');
-        
-        client.release();
+    app.get('/api/characters', async(req,res) =>{
+        const {type} = req.query;
+        const page = parseInt(req.query.page) || 1;
+        const limit = CHARACTERS_PER_PAGE;
+        const offset = (page-1)*limit;
 
-        res.json({ sucess: true, data: result.rows});
-    } catch (err){
-        console.error('Error executing query', err.stack);
-        res.status(500).json({success:false,message:'Error fetching data from characters'} );
-    }
-}
-);
+        if(!type){ return res.status(400).send('The parameter "type" is mandatory');}
+
+        const typeArray = type.split(',');
+
+        try{
+            const client = await pool.connect();
+
+            const countQueryText = `SELECT COUNT(*) FROM characters WHERE type = ANY($1)`;
+            const countResult = await client.query(countQueryText, [typeArray]);
+            const totalCount = parseInt(countResult.rows[0].count,10);
+
+            const queryText = `
+                SELECT id, name, info_url, image_url, type
+                FROM characters
+                WHERE type = ANY($1)
+                ORDER BY id
+                LIMIT $2 OFFSET $3`;
+            
+                const values = [typeArray, limit+1, offset];
+                const result = await client.query(queryText, values);
+                client.release();
+
+                const hasMore = result.rows.length > limit;
+                const charactersForPage = result.rows.slice(0,limit);
+
+                res.json({
+                    characters: charactersForPage,
+                    hasMore:hasMore,
+                    totalCount: totalCount
+                });
+        } catch (err){
+            console.error('Error:', err);
+            res.status(500).send('Server Error');
+        }
+    });
+
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

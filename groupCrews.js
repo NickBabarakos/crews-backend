@@ -19,7 +19,7 @@ function groupCrews(flatResults){
         position: row.position,
         image_url: row.image_url,
         info_url: row.info_url,
-        shop: row.shop,
+        type: row.type,
         required_level: row.required_level
     });
     }
