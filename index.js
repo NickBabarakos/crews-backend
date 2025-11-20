@@ -18,10 +18,50 @@ const CREWS_PER_PAGE = 4;
 const CHARACTERS_PER_PAGE = 60;
 
 app.get('/api/stages', async(req,res) =>{
-    const {stage, level} = req.query;
-    const page = parseInt(req.query.page) || 1; 
+    const { mode, stage, level, challengeType, challengeDetail, forest, boss } = req.query;
 
+    const page = parseInt(req.query.page) || 1; 
     const offset = (page-1)*CREWS_PER_PAGE;
+
+    let whereClause = '';
+    let queryParams = [];
+
+    if (!mode){ return res.status(400).send('Error: Mode parameter is required.'); }
+
+    switch(mode) {
+        case 'grand_voyage':
+            whereClause = 'WHERE stages.mode = $1 AND stages.name = $2 AND stages.level = $3';
+            queryParams = ['grand_voyage', stage, level];
+            break;
+
+        case 'garp_challenge':
+            whereClause = 'WHERE stages.mode = $1 AND stages.name = $2 AND stages.level = $3';
+            queryParams = ['garp_challenge', challengeType, challengeDetail];
+            break;
+        
+        case 'forest_of_training':
+            whereClause = 'WHERE stages.mode= $1 AND stages.name = $2';
+            queryParams = ['forest_of_training', forest];
+            break;
+        
+        case 'treasure_map':
+            whereClause = 'WHERE stages.mode = $1 AND stages.name = $2';
+            queryParams = ['treasure_map', boss];
+            break;
+        
+        case 'kizuna_clash':
+            whereClause = 'WHERE stages.mode = $1 AND stages.name = $2';
+            queryParams = ['kizuna_clash', boss];
+            break;
+        
+            case 'pirate_king_adventures':
+                whereClause = 'WHERE stages.mode=$1 AND stages.level = $2';
+                queryParams = ['pirate_king_adventures', level];
+                break;
+
+            default:
+                return res.status(400).send('Error: Invalid mode specified.');
+    }
 
     try{
         const client = await pool.connect();
@@ -30,9 +70,9 @@ app.get('/api/stages', async(req,res) =>{
                 SELECT crews.id
                 FROM crews
                 JOIN stages ON crews.stage_id = stages.id
-                WHERE stages.name = $1 AND stages.level = $2
+                ${whereClause}
                 ORDER BY crews.id
-                LIMIT $3 OFFSET $4
+                LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}
             )
             SELECT
                 c.id AS crew_id,
@@ -57,10 +97,11 @@ app.get('/api/stages', async(req,res) =>{
                 c.id, char.id;
         `;
 
-        const values = [stage, level, CREWS_PER_PAGE+1, offset];
+        const values = [...queryParams, CREWS_PER_PAGE+1, offset];
 
         const result = await client.query(queryText, values);
         client.release();
+
         const groupedCrews = groupCrews(result.rows);
         const hasMore = groupedCrews.length > CREWS_PER_PAGE;
         const crewsForPage = groupedCrews.slice(0, CREWS_PER_PAGE);
@@ -80,9 +121,9 @@ app.get('/api/stages', async(req,res) =>{
 
 
     app.get('/api/characters', async(req,res) =>{
+        const limit = parseInt(req.query.limit) || CHARACTERS_PER_PAGE;
         const {type} = req.query;
         const page = parseInt(req.query.page) || 1;
-        const limit = CHARACTERS_PER_PAGE;
         const offset = (page-1)*limit;
 
         if(!type){ return res.status(400).send('The parameter "type" is mandatory');}
