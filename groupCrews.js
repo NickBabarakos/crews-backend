@@ -20,7 +20,7 @@ function groupCrews(flatResults){
         image_url: row.image_url,
         info_url: row.info_url,
         type: row.type,
-        required_level: row.required_level
+        notes: row.notes
     });
     }
     return Array.from(crewMap.values());

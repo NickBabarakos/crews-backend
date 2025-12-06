@@ -74,7 +74,11 @@ app.post('/api/stages/search', async(req,res) =>{
 
         if (ownedIds && Array.isArray(ownedIds) && ownedIds.length >0){
             const paramIndex = queryParams.length + 1;
-            filterCondition = `HAVING bool_and(cm.character_id = ANY($${paramIndex}::int[]))`;
+            filterCondition = `HAVING bool_and(
+            cm.character_id = ANY($${paramIndex}::int[])
+             OR cm.character_id IS NULL
+             OR cm.position = 'Friend Captain'
+             OR(cm.notes IS NOT NULL AND LOWER(TRIM(cm.notes))= 'optional'))`;
             queryParams.push(ownedIds);
         }
 
@@ -95,7 +99,7 @@ app.post('/api/stages/search', async(req,res) =>{
                 c.title AS crew_title,
                 c.video_url,
                 cm.position,
-                cm.required_level,
+                cm.notes,
                 char.id AS character_id,
                 char.name AS character_name,
                 char.image_url,
@@ -193,17 +197,28 @@ app.post('/api/stages/search', async(req,res) =>{
 
         if(!type){ return res.status(400).send('The parameter "type" is mandatory');}
 
-        const typeArray = type.split(',');
 
         try{
             const client = await pool.connect();
 
-            let baseQuery = `FROM characters WHERE type = ANY($1)`;
-            let queryParams = [typeArray];
+            let baseQuery = `FROM characters`;
+            let queryParams = [];
+            let whereClauses = [];
+
+            if(type !== 'ALL'){
+                const typeArray=type.split(',');
+                whereClauses.push(`type = ANY($${queryParams.length+1})`);
+                queryParams.push(typeArray);
+            }
+
 
             if (search) {
-                baseQuery += ` AND (name ILIKE $2 OR CAST(id AS TEXT) LIKE $2)`;
+                whereClauses.push(`(name ILIKE $${queryParams.length+1} OR CAST(id AS TEXT) LIKE $${queryParams.length +1})`);
                 queryParams.push(`%${search}%`);
+            }
+
+            if(whereClauses.length >0){
+                baseQuery += ' WHERE ' + whereClauses.join(' AND ');
             }
 
             const countQueryText = `SELECT COUNT(*) ${baseQuery}`;
@@ -300,7 +315,7 @@ app.post('/api/stages/search', async(req,res) =>{
                 res.json({guide:guideData});
             } else{
                 console.log("NO Match found via SQL");
-                res.json({giude: null});
+                res.json({guide: null});
             }
         } catch(err){
             console.error(err);
@@ -439,8 +454,57 @@ app.post('/api/stages/search', async(req,res) =>{
         }
     });
 
+const adminAuth = (req, res, next) => {
+    const secret = req.headers['x-admin-secret'];
+    if(!secret || secret !== process.env.ADMIN_SECRET){
+        return res.status(401).json({error: 'Unauthorized: Invalid Admin Secret'});
+    }
+    next();
+};
+
+app.post('/api/admin/character', adminAuth, async(req,res) => {
+    const {id, name, info_url, type} = req.body;
+
+    if(!id || !name || !info_url || !type){
+        return res.status(400).json({error: 'All fields (id, name, info_url, type) are requird'});
+    }
+
+    const image_url = `/unit_icons/${id}`;
+
+    try{
+        const client = await pool.connect();
+
+        const checkQuery = 'SELECT id FROM characters WHERE id=$1';
+        const checkRes = await client.query(checkQuery, [id]);
+
+        if(checkRes.rows.length > 0){
+            client.release();
+            return res.status(409).json({error: `Character with ID ${id} already exists`});
+        }
+
+        const insertQuery = `
+        INSERT INTO characters (id, name, info_url, image_url, type)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING *
+        `;
+        const result = await client.query(insertQuery, [id, name, info_url, image_url, type]);
+
+        client.release();
+
+        res.json({
+            success: true,
+            message: `Character ${name} added successfully!`,
+            character: result.rows[0]
+        });
+    }catch(err){
+        console.error('Admin Inser Error:', err);
+        res.status(500).json({error: 'Database error during insetion'});
+
+    }
+});
+
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server is running on http://localhost:${PORT}`);
 });
