@@ -7,7 +7,11 @@ function groupCrews(flatResults){
             crewMap.set(row.crew_id, {
                 id: row.crew_id,
                 title: row.crew_title,
+                stage_name: row.stage_name,
                 video_url: row.video_url,
+                guide_type: row.guide_type,
+                text_guide: row.text_guide,
+                creator_name: row.creator_name,
                 members: []
             });
         }

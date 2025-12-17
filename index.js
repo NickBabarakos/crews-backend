@@ -6,13 +6,21 @@ const cors = require('cors');
 
 const { Pool } = require('pg');
 
+const os = require('os');
+
+const crypto = require('crypto');
+
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({limit: '50mb'}));
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL
 });
+
+const generateKey = (prefix) => {
+    return `${prefix}-${crypto.randomBytes(4).toString('hex')}-${crypto.randomBytes(4).toString('hex')}`;
+};
 
 const DEFAULT_CREWS_PER_PAGE = 4;
 const CHARACTERS_PER_PAGE = 60;
@@ -96,8 +104,13 @@ app.post('/api/stages/search', async(req,res) =>{
             )
             SELECT
                 c.id AS crew_id,
+                c.stage_id,
+                stages.name AS stage_name,
                 c.title AS crew_title,
                 c.video_url,
+                c.guide_type,
+                c.text_guide,
+                cr.name AS creator_name,
                 cm.position,
                 cm.notes,
                 char.id AS character_id,
@@ -107,6 +120,10 @@ app.post('/api/stages/search', async(req,res) =>{
                 char.type
             FROM
                 crews c
+            JOIN
+                stages ON c.stage_id = stages.id
+            LEFT JOIN
+                creators cr ON c.creator_id = cr.id
             JOIN
                 crew_members cm ON c.id = cm.crew_id
             JOIN
@@ -249,6 +266,20 @@ app.post('/api/stages/search', async(req,res) =>{
         }
     });
 
+    app.get('/api/characters/all-ids', async (req, res) => {
+        try{
+            const client = await pool.connect();
+            const queryText = 'SELECT id, type FROM characters';
+            const result = await client.query(queryText);
+            client.release();
+
+            res.json(result.rows);
+        } catch(err){
+            console.error('Error fetching all ids:', err);
+            res.status(500).send('Server Error');
+        }
+    });
+
 
     app.get('/api/stage-info', async(req,res) => {
         const {mode, stage, level, challengeType, challengeDetail, forest, boss, bosses} = req.query;
@@ -300,7 +331,7 @@ app.post('/api/stages/search', async(req,res) =>{
 
         try{
             const client = await pool.connect();
-            const queryText = `SELECT guide_json FROM stages ${whereClause} LIMIT 1`;
+            const queryText = `SELECT id, guide_json FROM stages ${whereClause} LIMIT 1`;
             console.log("Executing Query", queryText);
             console.log("Params:", queryParams);
             const result = await client.query(queryText, queryParams);
@@ -310,12 +341,15 @@ app.post('/api/stages/search', async(req,res) =>{
                 console.log("Guide Found");
                 const firstRow = result.rows[0];
                 const guideData = firstRow.guide_json;
+                const stageId = firstRow.id;
                 console.log("Sending Data type:", typeof guideData);
 
-                res.json({guide:guideData});
+                res.json({
+                    id: stageId,
+                    guide:guideData});
             } else{
                 console.log("NO Match found via SQL");
-                res.json({guide: null});
+                res.json({guide: null, id:null});
             }
         } catch(err){
             console.error(err);
@@ -336,11 +370,11 @@ app.post('/api/stages/search', async(req,res) =>{
                 SELECT
                     c.id,
                     c.name,
-                    c.channel_url,
+                    c.social_url,
                     COUNT(cr.id) as crew_count
                 FROM creators c
                 JOIN crews cr On c.id = cr.creator_id
-                GROUP BY c.id, c.name, c.channel_url
+                GROUP BY c.id, c.name, c.social_url
                 ORDER BY crew_count DESC
                 LIMIT $1 OFFSET $2
             `;
@@ -454,6 +488,219 @@ app.post('/api/stages/search', async(req,res) =>{
         }
     });
 
+    app.get('/api/crews/:id/context', async(req, res) => {
+        const {id} = req.params;
+        try{
+            const client = await pool.connect();
+
+            const crewQuery = `
+                SELECT
+                    c.id as crew_id,
+                    c.stage_id,
+                    s.mode,
+                    s.name as stage_name,
+                    s.level,
+                    s.image_url,
+                    s.id as stage_id
+                FROM crews c
+                JOIN stages s ON c.stage_id = s.id
+                WHERE c.id = $1
+            `;
+            const crewResult = await client.query(crewQuery, [id]);
+
+            if(crewResult.rows.length === 0) {
+                client.release();
+                return res.status(404).json({error: 'Crew not found'});
+            }
+
+            const crewData = crewResult.rows[0];
+
+            const rankQuery =`
+                SELECT COUNT(*) as rank
+                FROM crews
+                WHERE stage_id = $1 AND id <= $2
+            `;
+
+            const rankResult = await client.query(rankQuery, [crewData.stage_id, id]);
+            client.release();
+
+            const rank = parseInt(rankResult.rows[0].rank, 10);
+
+            res.json({
+                ...crewData,
+                rank: rank
+            });
+        } catch(err){
+            console.error(err);
+            res.status(500).send('Server Error fetching crew context');
+        }
+    });
+
+    app.post('/api/crews/submit', async(req,res) => {
+        const{
+            stage_id,
+            user_name,
+            user_social_url,
+            crew_data,
+            social_url,
+            guide_type,
+            video_url,
+            creator_url,
+            text_guide_details,
+            title
+        } = req.body;
+
+        if(!stage_id || !user_name || !crew_data || !guide_type) { return res.status(400).json({error: 'Missing required fields (stage, user, crew data, or guide type).'});}
+
+        if(guide_type === 'video' && !video_url){ return res.status(400).json({error: 'Video URL is required for video guides'});}
+
+        if(guide_type === 'text' && !text_guide_details){ return res.status(400).json({error: 'Instructions are required for text guides.'});}
+
+        try{
+            const client = await pool.connect();
+
+            const insertQuery = `
+                INSERT INTO pending_crews(
+                    stage_id,
+                    user_name,
+                    user_social_url,
+                    crew_data,
+                    guide_type,
+                    video_url,
+                    creator_url,
+                    text_guide_details,
+                    title,
+                    submitted_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+                RETURNING id;
+            `;
+
+            const values = [
+                stage_id,
+                user_name,
+                social_url || null,
+                crew_data,
+                guide_type,
+                video_url || null,
+                creator_url || null,
+                text_guide_details || null,
+                title || null
+            ];
+
+            const result = await client.query(insertQuery, values);
+            client.release();
+
+            res.json({
+                success: true,
+                message: 'Your crew has been submitted and is pending approval!',
+                pendingId: result.rows[0].id
+            });
+        } catch(err){
+            console.error('Error submitting crew:', err);
+            res.status(500).json({error: 'Internal Server Error during submission'});
+        }
+    });
+
+    app.post('/api/box/create', async(req,res) => {
+        const { initialData, favorites } = req.body;
+
+        const publicKey= generateKey('pub');
+        const secretKey = generateKey('sec');
+
+        try{
+            const client = await pool.connect();
+            const query = `
+                INSERT INTO user_boxes (public_key, secret_key, box_data, favorites)
+                VALUES ($1, $2, $3, $4)
+                RETURNING public_key, secret_key
+            `;
+
+            const dataToSave = initialData || {};
+            const favsToSave = favorites || [];
+
+            await client.query(query, [publicKey, secretKey, dataToSave, favsToSave]);
+            client.release();
+
+            res.json({ success: true, publicKey, secretKey});
+        } catch(err){
+            console.error('Error creating box:', err);
+            res.status(500).json({error: 'Failed to create box'});
+        }
+    });
+
+    app.post('/api/box/update', async(req, res) => {
+        const { secretKey, boxData, favorites } = req.body;
+
+        if(!secretKey) return res.status(401).json({error: 'Secret key required'});
+
+        try{
+            const client = await pool.connect();
+            const query = `
+                UPDATE user_boxes
+                SET box_data = $1, favorites = $2::jsonb, last_updated = NOW()
+                WHERE TRIM(secret_key) = TRIM($3)
+                RETURNING public_key
+            `;
+            const result = await client.query(query, [boxData, JSON.stringify(favorites || []), secretKey]);
+            client.release();
+
+            if(result.rowCount === 0){
+                return res.status(403).json({error: 'Invalid secret key'});
+            }
+
+            res.json({success: true});
+        } catch (err){
+            console.error('Error updating box:', err);
+            res.status(500).json({error: 'Failed to update box'})
+        }
+    });
+
+    app.post('/api/box/restore', async(req, res) => {
+        const { secretKey } = req.body;
+
+        try {
+            const client = await pool.connect();
+            const query = `SELECT public_key, box_data, favorites FROM user_boxes WHERE secret_key = $1`;
+            const result = await client.query(query, [secretKey]);
+            client.release();
+
+            if(result.rows.length === 0){
+                return res.status(404).json({error: 'Box not found'});
+            }
+
+            res.json({
+                success: true,
+                publicKey: result.rows[0].public_key,
+                boxData: result.rows[0].box_data,
+                favorites: result.rows[0].favorites || []
+            });
+        } catch(err){
+            console.error('Error restoring box:', err);
+            res.status(500).json({error: 'Server error'});
+        }
+    });
+
+    app.get('/api/box/view/:publicKey', async(req, res)=>{
+        const {publicKey} = req.params;
+
+        try{
+            const client = await pool.connect();
+            const query = `SELECT box_data FROM user_boxes WHERE public_key = $1`;
+            const result = await client.query(query, [publicKey]);
+            client.release();
+
+            if(result.rows.length === 0){
+                return res.status(404).json({error: 'Box not found'});
+            }
+
+            res.json({boxData: result.rows[0].box_data});
+        } catch(err){
+            console.error('Error viewing box:', err);
+            res.status(500).json({error: 'Server error'});
+        }
+    });
+
 const adminAuth = (req, res, next) => {
     const secret = req.headers['x-admin-secret'];
     if(!secret || secret !== process.env.ADMIN_SECRET){
@@ -503,8 +750,255 @@ app.post('/api/admin/character', adminAuth, async(req,res) => {
     }
 });
 
+app.post('/api/admin/check-creator', adminAuth, async(req,res) => {
+    const { social_url} = req.body;
+
+    if(!social_url){
+        return res.status(400).json({ error: 'Channel URL is required'});
+    }
+
+    try{
+        const client = await pool.connect();
+
+        const queryText = 'SELECT id, name, social_url FROM creators WHERE social_url = $1 LIMIT 1';
+        const result = await client.query(queryText, [social_url]);
+
+        client.release();
+
+        if(result.rows.length > 0){
+            res.json({
+                exists: true,
+                creator: result.rows[0]
+            });
+        } else{
+            res.json({
+                exists: false
+            });
+        }
+        
+    } catch(err) {
+        console.error('Check Creator Error:', err);
+        res.status(500).json({error: 'Database error while checking creator'});
+    }
+});
+
+app.post('/api/admin/create-creator', adminAuth, async(req,res) => {
+    const { name, social_url } = req.body;
+
+    if(!name || !social_url){
+        return res.status(400).json({ error: 'Name and Channel URL are required'});
+    }
+
+    try{
+        const client = await pool.connect();
+
+        const insertQuery= `
+            INSERT INTO creators (name, social_url)
+            VALUES ($1, $2)
+            RETURNING id, name, social_url
+        `;
+
+        const result = await client.query(insertQuery, [name, social_url]);
+        client.release();
+
+        res.json({
+            success: true,
+            message: 'Creator created successfully',
+            creator: result.rows[0]
+        });
+    } catch(err){
+        console.error('Create Creator Error:', err);
+        res.status(500).json({error: 'Failed to create creator. Name or URL might be invalide'});
+    }
+});
+
+app.post('/api/admin/create-crew', adminAuth, async(req,res) => {
+    const {
+        title,
+        stage_id,
+        video_url,
+        creator_id,
+        guide_type,
+        text_guide,
+        members
+    } = req.body;
+
+    if(!title || !stage_id || !creator_id || !guide_type){
+        return res.status(400).json({error: 'Missing required fields (title, stage, creator or guide type.'});
+    }
+
+    const client = await pool.connect();
+
+    try{
+        await client.query('BEGIN');
+
+        const insertCrewQuery = `
+            INSERT INTO crews (title, stage_id, video_url, creator_id, guide_type, text_guide)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id
+        `;
+
+        const crewValues = [
+            title,
+            stage_id,
+            video_url || null,
+            creator_id,
+            guide_type, 
+            text_guide || null
+        ];
+
+        const crewResult = await client.query(insertCrewQuery, crewValues);
+        const newCrewId = crewResult.rows[0].id;
+
+        if(members && Array.isArray(members) && members.length >0){
+            const insertMemberQuery = `
+                INSERT INTO crew_members (crew_id, character_id, position, notes)
+                VALUES ($1, $2, $3, $4)
+            `;
+
+            for (const member of members){
+                if(member.character_id){
+                    await client.query(insertMemberQuery, [
+                        newCrewId,
+                        member.character_id,
+                        member.position,
+                        member.notes || null
+                    ]);
+                }
+            }
+        }
+
+        await client.query('COMMIT');
+
+        res.json({
+            success: true,
+            message: 'Crew and members created successfully!',
+            crewId: newCrewId
+        });
+    } catch (err){
+        await client.query('ROLLBACK');
+        console.error('Create Crew Transaction Error', err);
+        res.status(500).json({
+            error: 'Database Transaction Failed',
+            details: err.detail || err.message,
+            constraint: err.constraint
+        });
+    } finally {
+        client.release();
+    }
+});
+
+app.get('/api/admin/pending-crews', adminAuth, async(req,res) => {
+    try{
+        const client = await pool.connect();
+        const query = `
+        SELECT pc.*, s.name as stage_name
+        FROM pending_crews pc
+        JOIN stages s ON pc.stage_id = s.id
+        ORDER BY pc.id ASC
+        `;
+        const result = await client.query(query);
+        client.release();
+        res.json(result.rows);
+    } catch (err){
+        console.error('Fetch Pending Crews Error:', err);
+        res.status(500).json({error: 'Failed to fetch pending crews'});
+    }
+});
+
+app.delete('/api/admin/pending-crews/:id', adminAuth,async (req,res)=> {
+    const { id } = req.params;
+    try{
+        const client = await pool.connect();
+        await client.query('DELETE FROM pending_crews WHERE id=$1', [id]);
+        client.release();
+        res.json({success: true, message: 'Pending crew deleted'});
+    } catch(err){
+        console.error('Delete Pending Crew Error:', err);
+        res.status(500).json({error: 'Failed to delete pending crew'});
+    }
+});
+
+app.post('/api/reports/submit', async(req,res) => {
+    const {crew_id, message} = req.body;
+
+    if(!crew_id || !message){
+        return res.status(400).json({error: 'Crew ID and message are required'});
+    }
+
+    try{
+        const client = await pool.connect();
+        const queryText= `
+            INSERT INTO crew_reports(crew_id, message)
+            VALUES ($1, $2)
+            RETURNING id
+        `;
+        await client.query(queryText, [crew_id, message]);
+        client.release();
+
+        res.json({success: true, message: 'Report submitted successfully'});
+    } catch(err){
+        console.error('Submit Report Error:', err);
+        res.status(500).json({error: 'Failed to submit report'});
+    }
+});
+
+app.get('/api/admin/reports', adminAuth, async(req,res) => {
+    try{
+        const client = await pool.connect();
+        const queryText= `
+            SELECT
+                r.id,
+                r.message,
+                r.created_at,
+                c.title AS crew_title,
+                c.id AS crew_id,
+                s.name AS stage_name
+            FROM crew_reports r
+            JOIN crews c ON r.crew_id = c.id
+            JOIN stages s ON c.stage_id = s.id
+            ORDER BY r.created_at ASC
+        `;
+        const result = await client.query(queryText);
+        client.release();
+
+        res.json(result.rows);
+    } catch(err){
+        console.error('Fetch Reports Error', err);
+        res.status(500).json({error:'Failed to fetch reports'});
+    }
+});
+
+app.delete('/api/admin/reports/:id', adminAuth, async(req,res)=> {
+    const {id} = req.params;
+
+    try{
+        const client = await pool.connect();
+        await client.query('DELETE FROM crew_reports WHERE id=$1', [id]);
+        client.release();
+
+        res.json({success: true, message:'Report resolved/deleted successfully'});
+    } catch(err){
+        console.error('Delete Report Error:', err);
+        res.status(500).json({error: 'Failed to delete report'});
+    }
+})
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
-});
+    const interfaces = os.networkInterfaces();
+    let networkIp = 'localhost';
+
+    for(const name of Object.keys(interfaces)){
+        for(const iface of interfaces[name]){
+            if(iface.family === 'IPv4' && !iface.internal){
+                networkIp = iface.address;
+                break;
+            }
+        }
+    }
+    console.log('App running on:');
+    console.log(`-Local: http://localhost:${PORT}`);
+    console.log(`-Network: http://${networkIp}:${PORT}`);
+}
+);
