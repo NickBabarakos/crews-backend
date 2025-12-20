@@ -406,6 +406,7 @@ app.post('/api/stages/search', async(req,res) =>{
         }
     });
 
+
     app.get('/api/banners', async(req,res) => {
         const limit = parseInt(req.query.limit) || 10;
         const page = parseInt(req.query.page) || 1;
@@ -536,16 +537,76 @@ app.post('/api/stages/search', async(req,res) =>{
         }
     });
 
+
+    app.post('/api/creators/verify-handle', async(req, res) => {
+        const { social_url } = req.body;
+
+        if(!social_url) return res.status(400).json({ error: 'URL required'});
+
+        try{
+            const client = await pool.connect();
+            const query = 'SELECT id, name, social_url FROM creators WHERE social_url = $1 LIMIT 1';
+            const result = await client.query(query, [social_url]);
+            client.release();
+
+            if(result.rows.length > 0){
+                res.json({
+                    status: 'FOUND',
+                    creator: result.rows[0]
+                });
+            } else {
+                res.json({status: 'NOT_FOUND'});
+            }
+        } catch(err){
+            console.error('verify Handle Error', err);
+            res.status(500).json({ error: 'Server check failed'});
+        }
+    });
+
+    app.post('/api/creators/verify-key', async(req,res)=> {
+        const { public_key } = req.body;
+
+        if(!public_key) return res.status(400).json({error: 'Key required'});
+
+        try{
+            const client = await pool.connect();
+
+            const creatorQuery = 'SELECT id,name,public_key FROM creators WHERE public_key = $1 LIMIT 1';
+            const creatorResult = await client.query(creatorQuery, [public_key]);
+
+            if(creatorResult.rows.length > 0){
+                client.release();
+                return res.json({
+                    status:'CREATOR_FOUND',
+                    creator: creatorResult.rows[0]
+                });
+            }
+
+            const boxQuery = 'SELECT public_key FROM user_boxes WHERE public_key = $1 LIMIT 1';
+            const boxResult = await client.query(boxQuery, [public_key]);
+            client.release();
+
+            if(boxResult.rows.length > 0){
+                return res.json({ status: 'VALID_KEY_NO_CREATOR'});
+            } else {
+                return res.json({status: 'INVALID_KEY'});
+            }
+        } catch (err){
+            console.error('Verify Key Error:', err);
+            res.status(500).json({error: 'Server check failed'});
+        }
+    });
+
     app.post('/api/crews/submit', async(req,res) => {
         const{
             stage_id,
             user_name,
-            user_social_url,
             crew_data,
-            social_url,
+            creator_url,
+            creator_key,
+            confirmed_creator_id,
             guide_type,
             video_url,
-            creator_url,
             text_guide_details,
             title
         } = req.body;
@@ -563,27 +624,29 @@ app.post('/api/stages/search', async(req,res) =>{
                 INSERT INTO pending_crews(
                     stage_id,
                     user_name,
-                    user_social_url,
+                    creator_url,
+                    creator_key,
+                    confirmed_creator_id,
                     crew_data,
                     guide_type,
                     video_url,
-                    creator_url,
                     text_guide_details,
                     title,
                     submitted_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
                 RETURNING id;
             `;
 
             const values = [
                 stage_id,
                 user_name,
-                social_url || null,
+                creator_url || null,
+                creator_key || null,
+                confirmed_creator_id || null,
                 crew_data,
                 guide_type,
                 video_url || null,
-                creator_url || null,
                 text_guide_details || null,
                 title || null
             ];
@@ -751,17 +814,25 @@ app.post('/api/admin/character', adminAuth, async(req,res) => {
 });
 
 app.post('/api/admin/check-creator', adminAuth, async(req,res) => {
-    const { social_url} = req.body;
+    const { social_url, public_key} = req.body;
 
-    if(!social_url){
-        return res.status(400).json({ error: 'Channel URL is required'});
+    if(!social_url && !public_key){
+        return res.status(400).json({ error: 'Channel URL or Public Key is required'});
     }
 
     try{
         const client = await pool.connect();
 
-        const queryText = 'SELECT id, name, social_url FROM creators WHERE social_url = $1 LIMIT 1';
-        const result = await client.query(queryText, [social_url]);
+        let queryText, params;
+        if(public_key){
+            queryText= 'SELECT id, name, social_url, public_key FROM creators WHERE public_key = $1 LIMIT 1';
+            params = [public_key];
+        } else {
+            queryText = 'SELECT id, name, social_url, public_key FROM creators WHERE social_url = $1 LIMIT 1';
+            params = [social_url]
+        }
+
+        const result = await client.query(queryText, params);
 
         client.release();
 
@@ -783,22 +854,22 @@ app.post('/api/admin/check-creator', adminAuth, async(req,res) => {
 });
 
 app.post('/api/admin/create-creator', adminAuth, async(req,res) => {
-    const { name, social_url } = req.body;
+    const { name, social_url, public_key } = req.body;
 
-    if(!name || !social_url){
-        return res.status(400).json({ error: 'Name and Channel URL are required'});
+    if(!name || (!social_url && !public_key)){
+        return res.status(400).json({ error: 'Name and either Channel URL or Public Key are required'});
     }
 
     try{
         const client = await pool.connect();
 
         const insertQuery= `
-            INSERT INTO creators (name, social_url)
-            VALUES ($1, $2)
-            RETURNING id, name, social_url
+            INSERT INTO creators (name, social_url, public_key)
+            VALUES ($1, $2, $3)
+            RETURNING id, name, social_url, public_key
         `;
 
-        const result = await client.query(insertQuery, [name, social_url]);
+        const result = await client.query(insertQuery, [name, social_url || null, public_key || null]);
         client.release();
 
         res.json({
@@ -809,6 +880,17 @@ app.post('/api/admin/create-creator', adminAuth, async(req,res) => {
     } catch(err){
         console.error('Create Creator Error:', err);
         res.status(500).json({error: 'Failed to create creator. Name or URL might be invalide'});
+    }
+});
+
+app.get('/api/creators/check-name/:name', async(req,res) => {
+    try{
+        const client = await pool.connect();
+        const result = await client.query('SELECT id FROM creators WHERE LOWER(TRIM(name)) = LOWER(TRIM($1)) LIMIT 1', [req.params.name]);
+        client.release();
+        res.json({exists: result.rows.length >0});
+    } catch (err){
+        res.status(500).json({error: 'Server error checking the name'});
     }
 });
 
@@ -982,7 +1064,60 @@ app.delete('/api/admin/reports/:id', adminAuth, async(req,res)=> {
         console.error('Delete Report Error:', err);
         res.status(500).json({error: 'Failed to delete report'});
     }
-})
+});
+
+app.post('/api/admin/banner', adminAuth, async(req,res)=> {
+    const { title, image_url, start_date, end_date, data_json } = req.body;
+
+    if(!title || !image_url || !start_date || !end_date || !data_json){
+        return res.status(400).json({error: 'All fields are required'});
+    }
+
+    try{
+        const client = await pool.connect();
+        const insertQuery = `
+            INSERT INTO banners(title, image_url, start_date, end_date, data_json)
+            VALUES ($1, $2, $3 AT TIME ZONE 'PST', $4 AT TIME ZONE 'PST', $5)
+            RETURNING id;
+        `;
+
+        const finalJson = typeof data_json === 'string' ? JSON.parse(data_json) : data_json;
+
+        const result = await client.query(insertQuery, [title, image_url, start_date, end_date, finalJson]);
+        client.release();
+
+        res.json({
+            success: true,
+            message: 'Banner created successfully',
+            bannerId: result.rows[0].id
+        });
+
+    } catch(err){
+        console.error('Create Banner Error', err);
+        res.status(500).json({error: 'Failed to create banner', details: err.message});
+    }
+});
+
+app.delete('api/admin/crews/:id', adminAuth, async(req,res) => {
+    const {id} = req.params;
+    const client = await pool.connect();
+    try{
+        await client.query('BEGIN');
+        await client.query('DELETE FROM crew_members WHERE crew_id = $1', [id]);
+        const result = await client.query('DELETE FROM crews WHERE id=$1', [id]);
+
+        if(result.rowCount === 0){
+            throw new Error('Crew not found');
+        }
+        await client.query('COMMIT');
+        res.json({success: true, message: `Crew ${id} and its members deleted`});
+    } catch (err){
+        await client.query('ROLLBACK');
+        res.status(500).json({error: err.message});
+    } finally {
+        client.release();
+    }
+});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
