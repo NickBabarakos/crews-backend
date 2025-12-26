@@ -7,17 +7,17 @@ class GameEvent{
                     id,
                     name,
                     mode,
-                    start_time AT TIME ZONE 'PST' as start_time,
-                    end_time AT TIME ZONE 'PST' as end_time,
+                    start_time AT TIME ZONE 'America/Los_Angeles' as start_time,
+                    end_time AT TIME ZONE 'America/Los_Angeles' as end_time,
                     CASE
-                        WHEN start_time <= NOW() THEN 'active'
+                        WHEN (start_time AT TIME ZONE 'America/Los_Angeles') <= NOW() THEN 'active'
                         ELSE 'upcoming'
                     END as status
                 FROM game_events
-                WHERE end_time > NOW()
+                WHERE (end_time AT TIME ZONE 'America/Los_Angeles') > NOW()
                 ORDER BY
-                    (CASE WHEN start_time <= NOW() THEN 1 ELSE 2 END) ASC,
-                    (CASE WHEN start_time <= NOW() then end_time ELSE start_time END) ASC
+                    (CASE WHEN (start_time AT TIME ZONE 'America/Los_Angeles') <= NOW() THEN 1 ELSE 2 END) ASC,
+                    (CASE WHEN (start_time AT TIME ZONE 'America/Los_Angeles') <= NOW() then end_time ELSE start_time END) ASC
             `;
 
             const result = await pool.query(queryText);
