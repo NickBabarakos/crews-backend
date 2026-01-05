@@ -61,6 +61,7 @@ class Stage{
                 c.id AS crew_id,
                 c.stage_id,
                 stages.name AS stage_name,
+                stages.level,
                 c.title AS crew_title,
                 c.video_url,
                 c.guide_type,

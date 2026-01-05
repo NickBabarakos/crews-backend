@@ -54,7 +54,7 @@ class PendingCrew{
     }
 
     static async delete(id){
-        const result = await pool.query('DELETE FROM pending_crews WHERE id=$1');
+        const result = await pool.query('DELETE FROM pending_crews WHERE id=$1', [id]);
         return result.rowCount > 0;
     }
 }
