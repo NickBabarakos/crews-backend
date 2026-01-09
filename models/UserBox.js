@@ -27,7 +27,7 @@ class UserBox {
         const query = `
                 UPDATE user_boxes
                 SET box_data = $1, favorites = $2::jsonb, last_updated = NOW()
-                WHERE TRIM(secret_key) = TRIM($3)
+                WHERE secret_key = $3
                 RETURNING public_key
             `;
         const result = await pool.query(query, [boxData, JSON.stringify(favorites), secretKey]);

@@ -67,9 +67,10 @@ class Crew{
 
         if(members && members.length > 0){
             const insertMember = `INSERT INTO crew_members (crew_id, character_id, position, notes) VALUES ($1, $2, $3, $4)`;
-            for(const m of members){
-                if(m.character_id) await client.query(insertMember, [newCrewId, m.character_id, m.position, m.notes || null]);
-            }
+            const memberPromises = members.map(m=>
+                client.query(insertMember, [newCrewId, m.character_id, m.position, m.notes || null])
+            );
+            await Promise.all(memberPromises);
         }
         await client.query('COMMIT');
         return newCrewId;

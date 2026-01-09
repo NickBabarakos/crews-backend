@@ -1,11 +1,11 @@
 const Character = require('../models/Character');
 
-const CHARACTERS_PER_PAGE = 60;
+const CHARACTERS_PER_PAGE = 300;
 
 const getCharacters = async (req,res) => {
     const limit = parseInt(req.query.limit) || CHARACTERS_PER_PAGE;
     const {type, search} = req.query;
-    const userSecret = req.headers['x-user-secret'];
+    const userPublicKey = req.headers['x-user-public'];
     const page = parseInt (req.query.page) || 1;
     const offset = (page-1)*limit;
 
@@ -14,7 +14,7 @@ const getCharacters = async (req,res) => {
     }
 
     try{
-        const {characters, totalCount, ownedCount } = await Character.search(type, search, limit + 1, offset, userSecret);
+        const {characters, totalCount, matchingIds } = await Character.search(type, search, limit + 1, offset, userPublicKey);
 
         const hasMore = characters.length > limit;
         const charactersForPage = characters.slice(0, limit);
@@ -23,7 +23,7 @@ const getCharacters = async (req,res) => {
             characters: charactersForPage,
             hasMore: hasMore,
             totalCount: totalCount,
-            ownedCount: ownedCount || 0
+            matchingIds: matchingIds || []
         });
     } catch(err){
         console.error('Error fetching characters:', err);

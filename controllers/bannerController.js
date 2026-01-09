@@ -27,7 +27,7 @@ const getBannerDetails = async (req, res) => {
     try{
         const banner = await Banner.getById(id);
 
-        if(!banner){
+        if(!banner || !banner.data_json){
             return res.status(404).json({error: 'Banner not found'});
         }
 

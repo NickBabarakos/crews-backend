@@ -20,7 +20,7 @@ class Character{
         return result.rows;
     }
 
-    static async search(type, search, limit, offset, userSecretKey){
+    static async search(type, search, limit, offset, userPublicKey){
         let baseQuery = `FROM characters`;
         let queryParams = [];
         let whereClauses = [];
@@ -40,26 +40,11 @@ class Character{
             baseQuery += ' WHERE ' + whereClauses.join(' AND ');
         }
 
-        const countQueryText = `SELECT COUNT(*) ${baseQuery}`;
-        const countResult = await pool.query(countQueryText, queryParams);
-        const totalCount = parseInt(countResult.rows[0].count, 10);
-
-        let ownedCount = 0;
-        if(userSecretKey){
-            const ownedQuery = `
-            WITH filtered_chars AS (
-                SELECT id ${baseQuery}
-            )
-            SELECT COUNT(*)
-            FROM filtered_chars
-            JOIN user_boxes ub ON ub.secret_key = $${queryParams.length+1}
-            WHERE (ub.box_data::jsonb) ? CAST(filtered_chars.id AS TEXT)
-            `;
-
-            const ownedParams = [...queryParams, userSecretKey];
-            const ownedResult = await pool.query(ownedQuery, ownedParams);
-            ownedCount = parseInt(ownedResult.rows[0].count, 10);
-        }
+        const idsQueryText = `SELECT id ${baseQuery}`;
+        const idsResult = await pool.query(idsQueryText, queryParams);
+        
+        const matchingIds = idsResult.rows.map(row => row.id);
+        const totalCount = matchingIds.length;
 
          const queryText = `
             SELECT id, name, info_url, image_url, type
@@ -73,7 +58,7 @@ class Character{
         return{
             characters: result.rows,
             totalCount: totalCount,
-            ownedCount: ownedCount
+            matchingIds: matchingIds
         };
     }
 

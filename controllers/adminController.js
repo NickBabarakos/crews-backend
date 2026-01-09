@@ -5,6 +5,7 @@ const PendingCrew = require('../models/PendingCrew');
 const Report = require('../models/Report');
 const Banner = require('../models/Banner');
 const GameEvent = require('../models/GameEvent');
+const jwt = require('jsonwebtoken');
 
 const addCharacter = async(req,res) => {
     const {id, name, info_url, type} = req.body;
@@ -78,7 +79,6 @@ const deleteCrew = async(req, res) => {
 
 const createBanner = async(req, res) => {
     const {title, image_url, start_date, end_date, data_json} = req.body;
-    if(!title) return res.status(400).json({error: 'Fields required'});
 
     try{
         const finalJson = typeof data_json === 'string' ? JSON.parse(data_json) : data_json;
@@ -138,7 +138,18 @@ const deleteReport = async(req, res) => {
     }
 };
 
+const login = async(req, res) => {
+    const {secret} = req.body;
+
+    if(process.env.ADMIN_SECRET && secret === process.env.ADMIN_SECRET){
+        const token = jwt.sign({role: 'admin'}, process.env.JWT_SECRET, {expiresIn: '2h'});
+        return res.json({success: true, token});
+    }
+    return res.status(401).json({error: 'Invalid Secret'});
+};
+
 module.exports = {
+    login,
     addCharacter,
     checkCreator, createCreator,
     createCrew, deleteCrew,

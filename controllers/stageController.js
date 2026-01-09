@@ -71,14 +71,18 @@ const searchStages = async (req, res) => {
 
     let filterCondition = '';
 
-    if(ownedIds && Array.isArray(ownedIds) && ownedIds.length > 0){
+    const safeOwnedIds = (ownedIds && Array.isArray(ownedIds))
+        ? ownedIds.map(id=> parseInt(id)).filter(id=> !isNaN(id)).slice(0,5000)
+        : [];
+
+    if(safeOwnedIds.length > 0){
         const paramIndex = queryParams.length + 1;
         filterCondition = `HAVING bool_and(
             cm.character_id = ANY($${paramIndex}::int[])
              OR cm.character_id IS NULL
              OR cm.position = 'Friend Captain'
              OR(cm.notes IS NOT NULL AND LOWER(TRIM(cm.notes))= 'optional'))`;
-            queryParams.push(ownedIds);
+            queryParams.push(safeOwnedIds);
     }
 
     try{

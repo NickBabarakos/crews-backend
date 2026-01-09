@@ -21,11 +21,12 @@ const createBox = async(req, res) => {
 
 const updateBox = async(req,res) => {
     const { secretKey, boxData, favorites} = req.body;
+    const cleanSecret = secretKey ? secretKey.trim(): null;
 
-    if(!secretKey) return res.status(401).json({error: 'Secret key required'});
+    if(!cleanSecret) return res.status(401).json({error: 'Secret key required'});
 
     try{
-        const updated = await UserBox.update(secretKey, boxData, favorites || []);
+        const updated = await UserBox.update(cleanSecret, boxData, favorites || []);
 
         if(!updated){
             return res.status(403).json({error: 'Invalid secret key'});
