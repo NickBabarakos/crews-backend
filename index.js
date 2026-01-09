@@ -5,6 +5,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const compression = require('compression');
 const os = require('os');
+const jwt = require('jsonwebtoken');
 
 const homeRoutes = require('./routes/homeRoutes');
 const stageRoutes = require('./routes/stageRoutes');
@@ -38,11 +39,24 @@ app.use(cors({
     }
 }));
 
+const isAdmin = (req) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if(!token) return false;
+    try{
+        jwt.verify(token, process.env.JWT_SECRET);
+        return true;
+    } catch (e){
+        return false;
+    }
+};
+
 //Rate Limiters Definitions
 const generalLimiter = rateLimit({
     windowMs: 15*60*1000,
     max: 200,
-    message: {error: 'Too many requests, please try again later.'}
+    message: {error: 'Too many requests, please try again later.'},
+    skip: (req) => isAdmin(req)
 });
 
 const loginLimiter = rateLimit({
@@ -54,7 +68,8 @@ const loginLimiter = rateLimit({
 const submissionLimiter = rateLimit({
     windowMs: 60*60*1000,
     max: 30,
-    message: {error: 'Submission limit reached. You can upload up to 30 items per hour.'}
+    message: {error: 'Submission limit reached. You can upload up to 30 items per hour.'},
+    skip: (req) => isAdmin(req)
 });
 
 
