@@ -59,7 +59,7 @@ const validateCrew = [
         }),
 
     body('text_guide_details')
-    .optional()
+    .optional({nullable: true})
     .isObject().withMessage('Invalid text guide format'),
 
     handleValidationErrors
