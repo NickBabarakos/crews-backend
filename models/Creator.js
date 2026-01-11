@@ -33,7 +33,7 @@ class Creator{
     }
 
     static async findBySocialUrl(url){
-        const queryText = 'SELECT id, name, social_url FROM creators WHERE social_url = $1 LIMIT 1';
+        const queryText = 'SELECT id, name, social_url FROM creators WHERE LOWER(TRIM(social_url)) = LOWER(TRIM($1)) LIMIT 1';
         const result = await pool.query(queryText, [url]);
         return result.rows[0];
     }
