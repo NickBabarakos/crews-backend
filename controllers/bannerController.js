@@ -50,13 +50,22 @@ const getBannerDetails = async (req, res) => {
             ...cat,
             characters: (cat.character_ids || []).map(id => charMap[id]).filter(Boolean)
         }));
+        
+        let allSteps = [];
+        if(rawJSON.steps && Array.isArray(rawJSON.steps)){
+            allSteps = rawJSON.steps;
+        }
+
 
         res.json({
             guide: {
                 exclusive_chance: rawJSON.exclusive_chance || "0%",
-                categories: hydratedCategories
+                categories: hydratedCategories,
+                steps: allSteps
             }
         });
+
+
     } catch(err){
         console.error(err);
         res.status(500).send('Error fetching banner info');
