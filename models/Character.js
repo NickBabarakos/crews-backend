@@ -5,7 +5,7 @@ class Character{
         const queryText = `
                 SELECT id, name, image_url, type, info_url
                 FROM characters
-                WHERE NOT (id BETWEEN 4986 AND 4996)
+                WHERE NOT (id BETWEEN 4986 AND 5056)
                 ORDER BY id DESC
                 LIMIT $1
             `;
