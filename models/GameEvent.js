@@ -63,6 +63,12 @@ class GameEvent{
             await client.query(`UPDATE stages SET name =$1, guide_json = $2 WHERE id=295`, [data.sb2Name, data.sb2Guide]);
         }
 
+        if(mode === 'blitz_battle'){
+            await client.query(`DELETE FROM crew_members WHERE crew_id IN (SELECT id FROM crews WHERE stage_id = 296)`);
+            await client.query(`DELETE FROM crews WHERE stage_id = 296`);
+            await client.query(`UPDATE stages SET name = $1, guide_json = $2 WHERE id = 296`, [data.bossName, data.bossGuide]);
+        }        
+
         await client.query('COMMIT');
         } catch(err){
             await client.query('ROLLBACK');

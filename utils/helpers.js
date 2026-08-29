@@ -71,6 +71,11 @@ function buildStageQuery(mode, stage, level, challengeType, challengeDetail, for
             queryParams = ['kizuna_clash', boss];
             break;
         
+            case 'blitz_battle':
+            whereClause = 'WHERE stages.mode = $1 AND stages.name = $2';
+            queryParams = ['blitz_battle', boss];
+            break;
+        
             case 'pirate_king_adventures':
                 whereClause = 'WHERE stages.mode=$1 AND stages.level = $2 AND stages.name = $3';
                 queryParams = ['pirate_king_adventures', level, bosses];

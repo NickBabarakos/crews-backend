@@ -4,7 +4,7 @@ const {groupCrews} = require('../utils/helpers');
 class Stage{
 
     static async getEventNames() {
-        const queryText=`SELECT id, name FROM stages WHERE id IN (281, 284, 287, 290, 291, 292, 293, 294, 295) ORDER BY id ASC`;
+        const queryText=`SELECT id, name FROM stages WHERE id IN (281, 284, 287, 290, 291, 292, 293, 294, 295, 296) ORDER BY id ASC`;
         const result = await pool.query(queryText);
 
         const namesMap = {};
